@@ -1,0 +1,217 @@
+// schema.prisma
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  admin
+  user
+}
+
+enum AccountType {
+  asset
+  liability
+  equity
+  revenue
+  expense
+}
+
+enum InvoiceStatus {
+  draft
+  issued
+  paid
+  void
+  posted
+}
+
+
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      UserRole @default(admin)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model Module {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  companies CompanyModule[]
+}
+
+model CompanyModule {
+  id        String   @id @default(uuid())
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  moduleId  String
+  module    Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, moduleId])
+  @@index([companyId])
+  @@index([moduleId])
+}
+
+model Account {
+  id        String      @id @default(uuid())
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  code     String
+  name     String
+  type     AccountType
+  isActive Boolean @default(true)
+
+  // لدعم شجرة الحسابات (parent/children)
+  parentId String?
+  parent   Account?  @relation("AccountHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Account[] @relation("AccountHierarchy")
+
+  // الكود عندك بيعمل update لـ balance
+  balance  Decimal @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  journalLines JournalEntryLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([parentId])
+}
+
+model Invoice {
+  id        String        @id @default(uuid())
+  companyId String
+  company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  number    String
+  customer  String?
+  status    InvoiceStatus @default(issued)
+
+  subtotal  Decimal @default(0)
+  tax       Decimal @default(0)
+  total     Decimal @default(0)
+
+  issueDate DateTime @default(now())
+  dueDate   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments  Payment[]
+  journalEntries JournalEntry[]
+
+  @@unique([companyId, number])
+  @@index([companyId])
+}
+
+model Payment {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  amount    Decimal
+  date      DateTime @default(now())
+  method    String?
+  reference String?
+
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  journalEntries JournalEntry[]
+
+  @@index([companyId])
+  @@index([invoiceId])
+}
+
+model Company {
+  id          String         @id @default(uuid())
+  name        String
+  slug        String         @unique
+  email       String         @unique
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  users       User[]
+  accounts    Account[]
+  modules     CompanyModule[]
+  invoices    Invoice[]
+  payments    Payment[]
+
+  // إضافة الحقل المعاكس هنا
+  journalEntries JournalEntry[]  // العلاقة العكسية
+}
+
+model JournalEntry {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  entryNo     String
+  date        DateTime @default(now())
+  memo        String?
+
+  invoiceId   String?
+  invoice     Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  paymentId   String?
+  payment     Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  lines       JournalEntryLine[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, entryNo])
+  @@index([companyId])
+  @@index([invoiceId])
+  @@index([paymentId])
+}
+
+
+model JournalEntryLine {
+  id           String       @id @default(uuid())
+  journalEntryId String
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  accountId    String
+  account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  debit        Decimal @default(0)
+  credit       Decimal @default(0)
+  description  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
